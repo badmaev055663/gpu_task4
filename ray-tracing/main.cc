@@ -6,7 +6,7 @@
 #include <limits>
 #include <memory>
 #include <vector>
-
+#include <CL/cl2.hpp>
 #include "color.hh"
 #include "ray.hh"
 #include "scene.hh"
@@ -97,8 +97,44 @@ void ray_tracing_cpu() {
     std::clog << "Movie time: " << max_time_step/60.f << "s" << std::endl;
 }
 
+struct OpenCL {
+    cl::Platform platform;
+    cl::Device device;
+    cl::Context context;
+    cl::Program program;
+    cl::CommandQueue queue;
+};
+
+const std::string src = R"(
+
+)";
+
 void ray_tracing_gpu() {
-    std::clog << "GPU version is not implemented!" << std::endl; std::exit(1);
+    /***** initial setup *****/
+    // find OpenCL platforms
+    std::vector<cl::Platform> platforms;
+    cl::Platform::get(&platforms);
+    if (platforms.empty()) {
+        std::cerr << "Unable to find OpenCL platforms\n";
+        return;
+    }
+    cl::Platform platform = platforms[0];
+    std::clog << "Platform name: " << platform.getInfo<CL_PLATFORM_NAME>() << '\n';
+    // create context
+    cl_context_properties properties[] =
+        { CL_CONTEXT_PLATFORM, (cl_context_properties)platform(), 0};
+    cl::Context context(CL_DEVICE_TYPE_GPU, properties);
+    // get all devices associated with the context
+    std::vector<cl::Device> devices = context.getInfo<CL_CONTEXT_DEVICES>();
+    cl::Device device = devices[0];
+    std::clog << "Device name: " << device.getInfo<CL_DEVICE_NAME>() << '\n';
+    cl::Program program(context, src);
+    // compile the programme
+    program.build(devices);
+    cl::CommandQueue queue(context, device);
+    OpenCL opencl{platform, device, context, program, queue};
+    /***** initial setup *****/
+
     using std::chrono::duration_cast;
     using std::chrono::seconds;
     using std::chrono::microseconds;
