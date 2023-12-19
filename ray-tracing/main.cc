@@ -106,7 +106,26 @@ struct OpenCL {
 };
 
 const std::string src = R"(
+typedef struct ray
+{
+	float3 origin;
+    float3 direction;
+} ray;
 
+typedef struct camera
+{
+    float3 origin;
+    float3 lower_left_corner;
+    float3 horizontal;
+    float3 vertical;
+} camera;
+
+ray make_ray(float u, float v, camera *cam) {
+    ray result;
+    result.origin = cam->origin;
+    result.direction = cam->lower_left_corner + u*cam->horizontal + v*cam->vertical - cam->origin;
+    return result;
+}
 )";
 
 void ray_tracing_gpu() {
@@ -140,11 +159,15 @@ void ray_tracing_gpu() {
     using std::chrono::microseconds;
     int nx = 600, ny = 400, nrays = 100;
     Pixel_matrix<float> pixels(nx,ny);
+    cl::Kernel kernel(opencl.program, "trace");
     thx::screen_recorder recorder("out.ogv", nx,ny);
-    std::vector<Sphere> objects = {
+    /*std::vector<Sphere> objects = {
         Sphere{vec(0.f,0.f,-1.f),0.5f},
         Sphere{vec(0.f,-1000.5f,-1.f),1000.f}
-    };
+    };*/
+    Object_group objects;
+    objects.add(object_ptr(new Sphere(vec(0.f,0.f,-1.f),0.5f)));
+    objects.add(object_ptr(new Sphere(vec(0.f,-1000.5f,-1.f),1000.f)));
     Camera camera;
     uniform_distribution distribution(0.f,1.f);
     float gamma = 2;
@@ -153,6 +176,20 @@ void ray_tracing_gpu() {
     duration total_time = duration::zero();
     for (int time_step=1; time_step<=max_time_step; ++time_step) {
         auto t0 = clock_type::now();
+        #pragma omp parallel for collapse(2) schedule(dynamic,1)
+        for (int j=0; j<ny; ++j) {
+            for (int i=0; i<nx; ++i) {
+                vec sum;
+                for (int k=0; k<nrays; ++k) {
+                    float u = (i + distribution(prng)) / nx;
+                    float v = (j + distribution(prng)) / ny;
+                    sum += trace(camera.make_ray(u,v),objects);
+                }
+                sum /= float(nrays); // antialiasing
+                sum = pow(sum,1.f/gamma); // gamma correction
+                pixels(i,j) = to_color(sum);
+            }
+        }
         // TODO Use GPU to race sun rays!
         auto t1 = clock_type::now();
         const auto dt = duration_cast<microseconds>(t1-t0);
